@@ -1,6 +1,3 @@
-#include "imgui.h"
-#include "imgui_impl_dx9.h"
-#include "imgui_impl_win32.h"
 #include <windows.h>
 #include <dwmapi.h>
 #include <d3d9.h>
@@ -8,6 +5,9 @@
 #include <vector>
 #include <iostream>
 #include <string>
+#include <sstream>
+
+#include "imgui.h"
 
 #include "memory.h"
 #include "gui.h"
