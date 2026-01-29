@@ -5,6 +5,9 @@
 namespace Globals {
     inline bool bGuestReset = false;
     inline bool bAimLock = false;
+    inline bool bHead = false;
+    inline bool bM82B = false;
+    inline bool bBlueCross = false;
     
     // Detected process info
     inline std::string currentProcess = "None";

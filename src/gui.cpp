@@ -1,6 +1,7 @@
 #include "gui.h"
 #include "globals.h"
 #include "imgui.h"
+#include <windows.h>
 #include <TlHelp32.h>
 #include <vector>
 #include <string>
@@ -96,6 +97,15 @@ void RenderGUI() {
     }
     
     if (ImGui::Checkbox("AIMBOT LOCK (AOB)", &Globals::bAimLock)) {
+    }
+
+    if (ImGui::Checkbox("AIMBOT HEAD (OB52)", &Globals::bHead)) {
+    }
+
+    if (ImGui::Checkbox("M82B ULTRA FAST", &Globals::bM82B)) {
+    }
+
+    if (ImGui::Checkbox("BLUE CROSSHAIR", &Globals::bBlueCross)) {
     }
 
     ImGui::Spacing();
