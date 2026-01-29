@@ -7,7 +7,6 @@
 #include <TlHelp32.h>
 #include <vector>
 
-// Helper for case-insensitive comparison
 bool IsSameString(const std::string& a, const char* b) {
     std::string bStr(b);
     if (a.size() != bStr.size()) return false;
@@ -56,8 +55,6 @@ bool Memory::Attach(const std::string& processName) {
     return (this->hProcess != NULL);
 }
 
-// Emulators don't expose Android libs as Windows Modules. We must scan ALL memory.
-// Returns 0 if not found.
 uintptr_t Memory::FindPattern(const std::string& ignoredModuleName, const std::string& patternStr) {
     if (!this->hProcess) return 0;
 
@@ -74,19 +71,29 @@ uintptr_t Memory::FindPattern(const std::string& ignoredModuleName, const std::s
     unsigned char* pRemote = nullptr;
     MEMORY_BASIC_INFORMATION mbi;
 
-    // Iterate over process memory regions
+    // Scan ALL valid memory, but be smart about alignment
     while (VirtualQueryEx(this->hProcess, pRemote, &mbi, sizeof(mbi))) {
-        // STRICT FILTER: Only scan EXECUTABLE memory. 
-        // Patching data (READWRITE) or generic heap often corrupts emulator state -> CRASH.
-        // We look for JIT code or loaded libraries (libil2cpp.so), which are always Executable.
-        bool isExecutable = (mbi.Protect & (PAGE_EXECUTE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE));
-        
-        if (mbi.State == MEM_COMMIT && isExecutable) {
+        // Emulator RAM is usually ReadWrite (Data) or ExecuteReadWrite.
+        // We MUST scan PAGE_READWRITE because that's where the Android Heap lives.
+        bool isValid = (mbi.State == MEM_COMMIT) &&
+                       ((mbi.Protect & PAGE_GUARD) == 0) &&
+                       ((mbi.Protect & PAGE_NOACCESS) == 0);
+
+        // Filter: Optimization. Usually game memory is Private or Mapped.
+        // We skip Image (DLLs) unless mapped, to avoid patching Windows DLLs by mistake.
+        if (isValid && (mbi.Type == MEM_PRIVATE || mbi.Type == MEM_MAPPED)) {
             
             std::vector<unsigned char> buffer(mbi.RegionSize);
             SIZE_T bytesRead;
+            
             if (ReadProcessMemory(this->hProcess, mbi.BaseAddress, buffer.data(), mbi.RegionSize, &bytesRead)) {
                 for (size_t i = 0; i < bytesRead - pattern.size(); ++i) {
+                    
+                    // CRITICAL: ARM Alignment Check
+                    // Instructions are always 4-byte aligned (0, 4, 8, C).
+                    // If we match at offset 1, 2, or 3, it's garbage/data, NOT code.
+                    if (((uintptr_t)mbi.BaseAddress + i) % 4 != 0) continue;
+
                     bool found = true;
                     for (size_t j = 0; j < pattern.size(); ++j) {
                         if (pattern[j] != -1 && pattern[j] != buffer[i + j]) {
@@ -96,7 +103,7 @@ uintptr_t Memory::FindPattern(const std::string& ignoredModuleName, const std::s
                     }
                     if (found) {
                         uintptr_t result = (uintptr_t)mbi.BaseAddress + i;
-                        std::cout << "[SCAN] Found Pattern at: " << std::hex << result << std::dec << std::endl;
+                        std::cout << "[SCAN] Found Pattern at: " << std::hex << result << std::dec << " (Region: " << mbi.RegionSize << " bytes)" << std::endl;
                         return result;
                     }
                 }
@@ -111,16 +118,24 @@ bool Memory::Patch(uintptr_t address, const std::vector<unsigned char>& bytes) {
     if (!this->hProcess || address == 0) return false;
     
     DWORD oldProtect;
-    if (!VirtualProtectEx(this->hProcess, (LPVOID)address, bytes.size(), PAGE_EXECUTE_READWRITE, &oldProtect))
-        return false;
+    // Attempt to make it writable and executable (just in case)
+    if (!VirtualProtectEx(this->hProcess, (LPVOID)address, bytes.size(), PAGE_EXECUTE_READWRITE, &oldProtect)) {
+        // If that fails, try just ReadWrite
+        if (!VirtualProtectEx(this->hProcess, (LPVOID)address, bytes.size(), PAGE_READWRITE, &oldProtect))
+            return false;
+    }
 
     SIZE_T written;
     bool success = WriteProcessMemory(this->hProcess, (LPVOID)address, bytes.data(), bytes.size(), &written);
 
+    // Restore original protection
     VirtualProtectEx(this->hProcess, (LPVOID)address, bytes.size(), oldProtect, &oldProtect);
+    
+    // IMPORTANT: Flush CPU cache so it executes the new instruction, not the old cached one
+    FlushInstructionCache(this->hProcess, (LPCVOID)address, bytes.size());
+
     return success;
 }
 
-// Unused but kept for interface compatibility
 uintptr_t Memory::GetModuleBaseAddress(const std::string& moduleName) { return 0; }
 bool Memory::WriteBytes(uintptr_t address, const std::vector<unsigned char>& bytes) { return Patch(address, bytes); }
