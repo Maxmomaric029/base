@@ -8,6 +8,12 @@ namespace Globals {
     inline bool bHead = false;
     inline bool bM82B = false;
     inline bool bBlueCross = false;
+    inline bool bAwm = false;
+    inline bool bM24 = false;
+    inline bool bNoRecoil = false;
+    inline bool bSpeed = false;
+    inline bool bHeadDmg = false;
+    inline bool bWallhack = false;
     
     // Detected process info
     inline std::string currentProcess = "None";

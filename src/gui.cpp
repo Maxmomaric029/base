@@ -5,6 +5,7 @@
 #include <TlHelp32.h>
 #include <vector>
 #include <string>
+#include <algorithm>
 
 // Debug helper to list processes
 std::vector<std::string> GetProcessList() {
@@ -12,15 +13,21 @@ std::vector<std::string> GetProcessList() {
     HANDLE hSnap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
     if (hSnap == INVALID_HANDLE_VALUE) return list;
 
-    PROCESSENTRY32A pe;
-    pe.dwSize = sizeof(PROCESSENTRY32A);
+    PROCESSENTRY32 pe;
+    pe.dwSize = sizeof(PROCESSENTRY32);
 
-    if (Process32FirstA(hSnap, &pe)) {
+    if (Process32First(hSnap, &pe)) {
         int count = 0;
         do {
-            list.push_back(pe.szExeFile);
+#ifdef UNICODE
+            std::wstring wStr(pe.szExeFile);
+            std::string sName(wStr.begin(), wStr.end());
+#else
+            std::string sName(pe.szExeFile);
+#endif
+            list.push_back(sName);
             count++;
-        } while (Process32NextA(hSnap, &pe) && count < 20); // List first 20 for debug
+        } while (Process32Next(hSnap, &pe) && count < 20); 
     }
     CloseHandle(hSnap);
     return list;
@@ -30,7 +37,6 @@ void SetupStyle() {
     ImGuiStyle& style = ImGui::GetStyle();
     ImGui::StyleColorsDark();
     
-    // Rounded Corners
     style.WindowRounding = 12.0f;
     style.ChildRounding = 8.0f;
     style.FrameRounding = 6.0f;
@@ -44,7 +50,6 @@ void SetupStyle() {
 
     ImVec4* colors = style.Colors;
     
-    // ROG Style: Black and Dark Red
     colors[ImGuiCol_WindowBg]             = ImVec4(0.08f, 0.08f, 0.08f, 1.00f);
     colors[ImGuiCol_ChildBg]              = ImVec4(0.10f, 0.10f, 0.10f, 0.00f);
     colors[ImGuiCol_PopupBg]              = ImVec4(0.10f, 0.10f, 0.10f, 0.94f);
@@ -93,20 +98,17 @@ void RenderGUI() {
     ImGui::Text("MEMORY MODIFICATIONS");
     ImGui::Spacing();
     
-    if (ImGui::Checkbox("GUEST ACCOUNT RESET", &Globals::bGuestReset)) {
-    }
-    
-    if (ImGui::Checkbox("AIMBOT LOCK (AOB)", &Globals::bAimLock)) {
-    }
-
-    if (ImGui::Checkbox("AIMBOT HEAD (OB52)", &Globals::bHead)) {
-    }
-
-    if (ImGui::Checkbox("M82B ULTRA FAST", &Globals::bM82B)) {
-    }
-
-    if (ImGui::Checkbox("BLUE CROSSHAIR", &Globals::bBlueCross)) {
-    }
+    ImGui::Checkbox("GUEST ACCOUNT RESET", &Globals::bGuestReset);
+    ImGui::Checkbox("AIMBOT LOCK (AOB)", &Globals::bAimLock);
+    ImGui::Checkbox("AIMBOT HEAD (OB52)", &Globals::bHead);
+    ImGui::Checkbox("M82B ULTRA FAST", &Globals::bM82B);
+    ImGui::Checkbox("AWM SWITCH FAST", &Globals::bAwm);
+    ImGui::Checkbox("M24 SWITCH FAST", &Globals::bM24);
+    ImGui::Checkbox("NO RECOIL", &Globals::bNoRecoil);
+    ImGui::Checkbox("SPEED RUN", &Globals::bSpeed);
+    ImGui::Checkbox("HEAD DAMAGE", &Globals::bHeadDmg);
+    ImGui::Checkbox("WALLHACK", &Globals::bWallhack);
+    ImGui::Checkbox("BLUE CROSSHAIR", &Globals::bBlueCross);
 
     ImGui::Spacing();
     ImGui::Separator();

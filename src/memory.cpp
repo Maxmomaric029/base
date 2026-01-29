@@ -1,13 +1,23 @@
+#ifndef UNICODE
+#define UNICODE
+#endif
+#ifndef _UNICODE
+#define _UNICODE
+#endif
+
 #include "memory.h"
 #include <sstream>
 #include <iomanip>
 #include <algorithm>
 #include <iostream>
+#include <windows.h>
+#include <TlHelp32.h>
 
-// Helper for case-insensitive comparison
-bool IsSameString(const std::string& a, const std::string& b) {
-    if (a.size() != b.size()) return false;
-    return std::equal(a.begin(), a.end(), b.begin(),
+// Helper for case-insensitive comparison (Works with std::string which is ANSI)
+bool IsSameString(const std::string& a, const char* b) {
+    std::string bStr(b);
+    if (a.size() != bStr.size()) return false;
+    return std::equal(a.begin(), a.end(), bStr.begin(),
                       [](unsigned char a, unsigned char b) {
                           return std::tolower(a) == std::tolower(b);
                       });
@@ -17,7 +27,6 @@ Memory::Memory(const std::string& processName) {
     this->hProcess = NULL;
     this->processId = 0;
     this->moduleBase = 0;
-    Attach(processName);
 }
 
 Memory::~Memory() {
@@ -27,27 +36,31 @@ Memory::~Memory() {
 }
 
 bool Memory::Attach(const std::string& processName) {
-    // Explicitly use ANSI version (TH32CS_SNAPPROCESS)
     HANDLE hSnap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
     if (hSnap == INVALID_HANDLE_VALUE) return false;
 
-    PROCESSENTRY32A pe; // Force ANSI struct
-    pe.dwSize = sizeof(PROCESSENTRY32A);
+    PROCESSENTRY32 pe; 
+    pe.dwSize = sizeof(PROCESSENTRY32);
 
-    if (Process32FirstA(hSnap, &pe)) { // Force ANSI function
+    if (Process32First(hSnap, &pe)) {
         do {
-            if (IsSameString(processName, pe.szExeFile)) {
+            // Convert pe.szExeFile to std::string for comparison
+#ifdef UNICODE
+            std::wstring wStr(pe.szExeFile);
+            std::string sExeFile(wStr.begin(), wStr.end());
+#else
+            std::string sExeFile(pe.szExeFile);
+#endif
+            if (IsSameString(processName, sExeFile.c_str())) {
                 this->processId = pe.th32ProcessID;
                 this->hProcess = OpenProcess(PROCESS_ALL_ACCESS, FALSE, this->processId);
                 
                 if (this->hProcess) {
-                    std::cout << "[SUCCESS] Attached to: " << pe.szExeFile << " (PID: " << this->processId << ")" << std::endl;
-                } else {
-                    std::cout << "[ERROR] Found process but failed to OpenProcess. RUN AS ADMIN!" << std::endl;
+                    std::cout << "[SUCCESS] Attached to: " << sExeFile << " (PID: " << this->processId << ")" << std::endl;
                 }
                 break;
             }
-        } while (Process32NextA(hSnap, &pe)); // Force ANSI function
+        } while (Process32Next(hSnap, &pe));
     }
     CloseHandle(hSnap);
     return (this->hProcess != NULL);
@@ -57,18 +70,24 @@ uintptr_t Memory::GetModuleBaseAddress(const std::string& moduleName) {
     HANDLE hSnap = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, this->processId);
     if (hSnap == INVALID_HANDLE_VALUE) return 0;
 
-    MODULEENTRY32A me; // Force ANSI struct
-    me.dwSize = sizeof(MODULEENTRY32A);
+    MODULEENTRY32 me;
+    me.dwSize = sizeof(MODULEENTRY32);
     uintptr_t baseAddr = 0;
 
-    if (Module32FirstA(hSnap, &me)) { // Force ANSI function
+    if (Module32First(hSnap, &me)) {
         do {
-            if (IsSameString(moduleName, me.szModule)) {
+#ifdef UNICODE
+            std::wstring wStr(me.szModule);
+            std::string sModule(wStr.begin(), wStr.end());
+#else
+            std::string sModule(me.szModule);
+#endif
+            if (IsSameString(moduleName, sModule.c_str())) {
                 baseAddr = (uintptr_t)me.modBaseAddr;
                 std::cout << "[DEBUG] Found Module: " << moduleName << " @ " << std::hex << baseAddr << std::dec << std::endl;
                 break;
             }
-        } while (Module32NextA(hSnap, &me));
+        } while (Module32Next(hSnap, &me));
     }
     CloseHandle(hSnap);
     return baseAddr;
@@ -89,7 +108,6 @@ bool Memory::Patch(uintptr_t address, const std::vector<unsigned char>& bytes) {
     return success;
 }
 
-// Convert "AA BB CC" to vector of ints (-1 for ?)
 std::vector<int> ParsePattern(const std::string& pattern) {
     std::vector<int> bytes;
     std::stringstream ss(pattern);
@@ -107,28 +125,26 @@ std::vector<int> ParsePattern(const std::string& pattern) {
 uintptr_t Memory::FindPattern(const std::string& moduleName, const std::string& patternStr) {
     uintptr_t moduleBase = GetModuleBaseAddress(moduleName);
     
-    // For Emulators: libil2cpp.so might not be listed as a Windows Module because it's inside the VM memory.
-    // If GetModuleBaseAddress returns 0, we can't easily scan it without full memory dump scanning (which is slow).
-    // But let's assume the user knows it's mapped or we scan the main process.
-    
-    if (moduleBase == 0) {
-        std::cout << "[DEBUG] Module " << moduleName << " not found. Skipping scan." << std::endl;
-        return 0; 
-    }
+    if (moduleBase == 0) return 0;
 
-    // Get Module Size
     HANDLE hSnap = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, this->processId);
     if (hSnap == INVALID_HANDLE_VALUE) return 0;
-    MODULEENTRY32A me;
-    me.dwSize = sizeof(MODULEENTRY32A);
+    MODULEENTRY32 me;
+    me.dwSize = sizeof(MODULEENTRY32);
     DWORD moduleSize = 0;
-    if (Module32FirstA(hSnap, &me)) {
+    if (Module32First(hSnap, &me)) {
         do {
-            if (IsSameString(moduleName, me.szModule)) {
+#ifdef UNICODE
+            std::wstring wStr(me.szModule);
+            std::string sModule(wStr.begin(), wStr.end());
+#else
+            std::string sModule(me.szModule);
+#endif
+            if (IsSameString(moduleName, sModule.c_str())) {
                 moduleSize = me.modBaseSize;
                 break;
             }
-        } while (Module32NextA(hSnap, &me));
+        } while (Module32Next(hSnap, &me));
     }
     CloseHandle(hSnap);
 
