@@ -1,10 +1,3 @@
-#ifndef UNICODE
-#define UNICODE
-#endif
-#ifndef _UNICODE
-#define _UNICODE
-#endif
-
 #include "memory.h"
 #include <sstream>
 #include <iomanip>
@@ -12,8 +5,9 @@
 #include <iostream>
 #include <windows.h>
 #include <TlHelp32.h>
+#include <vector>
 
-// Helper for case-insensitive comparison (Works with std::string which is ANSI)
+// Helper for case-insensitive comparison
 bool IsSameString(const std::string& a, const char* b) {
     std::string bStr(b);
     if (a.size() != bStr.size()) return false;
@@ -30,9 +24,7 @@ Memory::Memory(const std::string& processName) {
 }
 
 Memory::~Memory() {
-    if (this->hProcess) {
-        CloseHandle(this->hProcess);
-    }
+    if (this->hProcess) CloseHandle(this->hProcess);
 }
 
 bool Memory::Attach(const std::string& processName) {
@@ -44,7 +36,6 @@ bool Memory::Attach(const std::string& processName) {
 
     if (Process32First(hSnap, &pe)) {
         do {
-            // Convert pe.szExeFile to std::string for comparison
 #ifdef UNICODE
             std::wstring wStr(pe.szExeFile);
             std::string sExeFile(wStr.begin(), wStr.end());
@@ -54,7 +45,6 @@ bool Memory::Attach(const std::string& processName) {
             if (IsSameString(processName, sExeFile.c_str())) {
                 this->processId = pe.th32ProcessID;
                 this->hProcess = OpenProcess(PROCESS_ALL_ACCESS, FALSE, this->processId);
-                
                 if (this->hProcess) {
                     std::cout << "[SUCCESS] Attached to: " << sExeFile << " (PID: " << this->processId << ")" << std::endl;
                 }
@@ -66,107 +56,71 @@ bool Memory::Attach(const std::string& processName) {
     return (this->hProcess != NULL);
 }
 
-uintptr_t Memory::GetModuleBaseAddress(const std::string& moduleName) {
-    HANDLE hSnap = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, this->processId);
-    if (hSnap == INVALID_HANDLE_VALUE) return 0;
+// Emulators don't expose Android libs as Windows Modules. We must scan ALL memory.
+// Returns 0 if not found.
+uintptr_t Memory::FindPattern(const std::string& ignoredModuleName, const std::string& patternStr) {
+    if (!this->hProcess) return 0;
 
-    MODULEENTRY32 me;
-    me.dwSize = sizeof(MODULEENTRY32);
-    uintptr_t baseAddr = 0;
-
-    if (Module32First(hSnap, &me)) {
-        do {
-#ifdef UNICODE
-            std::wstring wStr(me.szModule);
-            std::string sModule(wStr.begin(), wStr.end());
-#else
-            std::string sModule(me.szModule);
-#endif
-            if (IsSameString(moduleName, sModule.c_str())) {
-                baseAddr = (uintptr_t)me.modBaseAddr;
-                std::cout << "[DEBUG] Found Module: " << moduleName << " @ " << std::hex << baseAddr << std::dec << std::endl;
-                break;
-            }
-        } while (Module32Next(hSnap, &me));
+    std::vector<int> pattern;
+    std::stringstream ss(patternStr);
+    std::string byteStr;
+    while (ss >> byteStr) {
+        if (byteStr == "?" || byteStr == "??") pattern.push_back(-1);
+        else pattern.push_back(std::stoi(byteStr, nullptr, 16));
     }
-    CloseHandle(hSnap);
-    return baseAddr;
-}
 
-bool Memory::WriteBytes(uintptr_t address, const std::vector<unsigned char>& bytes) {
-    return WriteProcessMemory(this->hProcess, (LPVOID)address, bytes.data(), bytes.size(), NULL);
+    if (pattern.empty()) return 0;
+
+    unsigned char* pRemote = nullptr;
+    MEMORY_BASIC_INFORMATION mbi;
+
+    // Iterate over process memory regions
+    while (VirtualQueryEx(this->hProcess, pRemote, &mbi, sizeof(mbi))) {
+        // Filter for readable/writable/executable memory and committed pages
+        if (mbi.State == MEM_COMMIT && 
+           (mbi.Protect & (PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE | PAGE_READWRITE | PAGE_READONLY))) {
+            
+            // Optimization: Skip very small regions or typically system mapped regions if known, 
+            // but for safety we scan everything relevant.
+            
+            std::vector<unsigned char> buffer(mbi.RegionSize);
+            SIZE_T bytesRead;
+            if (ReadProcessMemory(this->hProcess, mbi.BaseAddress, buffer.data(), mbi.RegionSize, &bytesRead)) {
+                for (size_t i = 0; i < bytesRead - pattern.size(); ++i) {
+                    bool found = true;
+                    for (size_t j = 0; j < pattern.size(); ++j) {
+                        if (pattern[j] != -1 && pattern[j] != buffer[i + j]) {
+                            found = false;
+                            break;
+                        }
+                    }
+                    if (found) {
+                        uintptr_t result = (uintptr_t)mbi.BaseAddress + i;
+                        std::cout << "[SCAN] Found Pattern at: " << std::hex << result << std::dec << std::endl;
+                        return result;
+                    }
+                }
+            }
+        }
+        pRemote += mbi.RegionSize;
+    }
+    return 0;
 }
 
 bool Memory::Patch(uintptr_t address, const std::vector<unsigned char>& bytes) {
+    if (!this->hProcess || address == 0) return false;
+    
     DWORD oldProtect;
     if (!VirtualProtectEx(this->hProcess, (LPVOID)address, bytes.size(), PAGE_EXECUTE_READWRITE, &oldProtect))
         return false;
 
-    bool success = WriteBytes(address, bytes);
+    SIZE_T written;
+    bool success = WriteProcessMemory(this->hProcess, (LPVOID)address, bytes.data(), bytes.size(), &written);
 
     VirtualProtectEx(this->hProcess, (LPVOID)address, bytes.size(), oldProtect, &oldProtect);
     return success;
 }
 
-std::vector<int> ParsePattern(const std::string& pattern) {
-    std::vector<int> bytes;
-    std::stringstream ss(pattern);
-    std::string byteStr;
-    
-    while (ss >> byteStr) {
-        if (byteStr == "?" || byteStr == "??")
-            bytes.push_back(-1);
-        else
-            bytes.push_back(std::stoi(byteStr, nullptr, 16));
-    }
-    return bytes;
-}
-
-uintptr_t Memory::FindPattern(const std::string& moduleName, const std::string& patternStr) {
-    uintptr_t moduleBase = GetModuleBaseAddress(moduleName);
-    
-    if (moduleBase == 0) return 0;
-
-    HANDLE hSnap = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, this->processId);
-    if (hSnap == INVALID_HANDLE_VALUE) return 0;
-    MODULEENTRY32 me;
-    me.dwSize = sizeof(MODULEENTRY32);
-    DWORD moduleSize = 0;
-    if (Module32First(hSnap, &me)) {
-        do {
-#ifdef UNICODE
-            std::wstring wStr(me.szModule);
-            std::string sModule(wStr.begin(), wStr.end());
-#else
-            std::string sModule(me.szModule);
-#endif
-            if (IsSameString(moduleName, sModule.c_str())) {
-                moduleSize = me.modBaseSize;
-                break;
-            }
-        } while (Module32Next(hSnap, &me));
-    }
-    CloseHandle(hSnap);
-
-    if (moduleSize == 0) return 0;
-
-    std::vector<unsigned char> moduleBytes(moduleSize);
-    if (!ReadProcessMemory(this->hProcess, (LPCVOID)moduleBase, moduleBytes.data(), moduleSize, NULL))
-        return 0;
-
-    std::vector<int> pattern = ParsePattern(patternStr);
-    
-    for (size_t i = 0; i < moduleSize - pattern.size(); ++i) {
-        bool found = true;
-        for (size_t j = 0; j < pattern.size(); ++j) {
-            if (pattern[j] != -1 && pattern[j] != moduleBytes[i + j]) {
-                found = false;
-                break;
-            }
-        }
-        if (found) {
-            return moduleBase + i;
-        }
-    }
-    return 0;
-}
+// Unused but kept for interface compatibility
+uintptr_t Memory::GetModuleBaseAddress(const std::string& moduleName) { return 0; }
+bool Memory::WriteBytes(uintptr_t address, const std::vector<unsigned char>& bytes) { return Patch(address, bytes); }
