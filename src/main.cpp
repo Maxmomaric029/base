@@ -94,12 +94,27 @@ void HandleFeature(Feature& f, bool enabled) {
 }
 
 void FeatureLoop() {
-    static bool attached = false;
-    if (!mem) mem = new Memory(Globals::TARGET_PROCESS);
+    if (!Globals::isAttached) {
+        for (const std::string& exeName : Globals::SUPPORTED_EMULATORS) {
+            if (mem == nullptr) {
+                mem = new Memory(exeName);
+            }
 
-    if (!attached) {
-        attached = mem->Attach(Globals::TARGET_PROCESS);
+            if (mem->Attach(exeName)) {
+                Globals::currentProcess = exeName;
+                Globals::isAttached = true;
+                break;
+            }
+        }
     } else {
+        // Check if process is still alive
+        DWORD exitCode;
+        if (GetExitCodeProcess(mem->hProcess, &exitCode) && exitCode != STILL_ACTIVE) {
+            Globals::isAttached = false;
+            Globals::currentProcess = "None";
+            return;
+        }
+
         HandleFeature(fGuest, Globals::bGuestReset);
         HandleFeature(fAim, Globals::bAimLock);
     }

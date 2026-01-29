@@ -1,14 +1,22 @@
 #pragma once
 #include <string>
+#include <vector>
 
 namespace Globals {
     inline bool bGuestReset = false;
     inline bool bAimLock = false;
     
-    // Config
-    const std::string TARGET_PROCESS = "HD-Player.exe"; // Example: BlueStacks
-    const std::string TARGET_MODULE = "libil2cpp.so"; // Typically Android games on emulators run in a library, or just scan the main executable memory if mapped. 
-    // Note: For emulators, memory scanning is tricky because the game memory is inside the emulator's heap. 
-    // But for this generic request, we will scan the process/module defined here.
-    // Users often scan the whole process or a specific region.
+    // Detected process info
+    inline std::string currentProcess = "None";
+    inline bool isAttached = false;
+
+    // Supported Emulators
+    const std::vector<std::string> SUPPORTED_EMULATORS = {
+        "HD-Player.exe",          // BlueStacks 5 / MSI App Player
+        "dnplayer.exe",           // LDPlayer
+        "LdVBoxHeadless.exe",     // LDPlayer (VirtualBox mode)
+        "AndroidEmulatorEx.exe"   // GameLoop
+    };
+
+    const std::string TARGET_MODULE = "libil2cpp.so"; 
 }
