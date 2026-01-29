@@ -206,6 +206,20 @@ int main(int, char**)
         ImGui_ImplWin32_NewFrame();
         ImGui::NewFrame();
         if (bMenuVisible) RenderGUI();
+        
+        // --- Click-Through Logic ---
+        static bool wasVisible = true;
+        if (bMenuVisible != wasVisible) {
+            wasVisible = bMenuVisible;
+            LONG_PTR exStyle = GetWindowLongPtr(hwnd, GWL_EXSTYLE);
+            if (bMenuVisible)
+                exStyle &= ~WS_EX_TRANSPARENT; // Menu open: Enable clicks
+            else
+                exStyle |= WS_EX_TRANSPARENT;  // Menu closed: Click through to game
+            SetWindowLongPtr(hwnd, GWL_EXSTYLE, exStyle);
+        }
+        // ---------------------------
+
         if (GetAsyncKeyState(VK_INSERT) & 1) bMenuVisible = !bMenuVisible;
         ImGui::EndFrame();
 

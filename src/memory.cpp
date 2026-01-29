@@ -76,12 +76,12 @@ uintptr_t Memory::FindPattern(const std::string& ignoredModuleName, const std::s
 
     // Iterate over process memory regions
     while (VirtualQueryEx(this->hProcess, pRemote, &mbi, sizeof(mbi))) {
-        // Filter for readable/writable/executable memory and committed pages
-        if (mbi.State == MEM_COMMIT && 
-           (mbi.Protect & (PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE | PAGE_READWRITE | PAGE_READONLY))) {
-            
-            // Optimization: Skip very small regions or typically system mapped regions if known, 
-            // but for safety we scan everything relevant.
+        // STRICT FILTER: Only scan EXECUTABLE memory. 
+        // Patching data (READWRITE) or generic heap often corrupts emulator state -> CRASH.
+        // We look for JIT code or loaded libraries (libil2cpp.so), which are always Executable.
+        bool isExecutable = (mbi.Protect & (PAGE_EXECUTE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE));
+        
+        if (mbi.State == MEM_COMMIT && isExecutable) {
             
             std::vector<unsigned char> buffer(mbi.RegionSize);
             SIZE_T bytesRead;
