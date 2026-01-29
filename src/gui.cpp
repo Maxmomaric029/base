@@ -1,6 +1,29 @@
 #include "gui.h"
 #include "globals.h"
 #include "imgui.h"
+#include <TlHelp32.h>
+#include <vector>
+#include <string>
+
+// Debug helper to list processes
+std::vector<std::string> GetProcessList() {
+    std::vector<std::string> list;
+    HANDLE hSnap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (hSnap == INVALID_HANDLE_VALUE) return list;
+
+    PROCESSENTRY32A pe;
+    pe.dwSize = sizeof(PROCESSENTRY32A);
+
+    if (Process32FirstA(hSnap, &pe)) {
+        int count = 0;
+        do {
+            list.push_back(pe.szExeFile);
+            count++;
+        } while (Process32NextA(hSnap, &pe) && count < 20); // List first 20 for debug
+    }
+    CloseHandle(hSnap);
+    return list;
+}
 
 void SetupStyle() {
     ImGuiStyle& style = ImGui::GetStyle();
@@ -52,15 +75,15 @@ void SetupStyle() {
 }
 
 void RenderGUI() {
-    ImGui::SetNextWindowSize(ImVec2(450, 320), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(500, 400), ImGuiCond_FirstUseEver);
     
-    // Modern look with dark red accents
     ImGui::Begin("BLOODIE HACK | ROG EDITION", nullptr, ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize);
 
     if (Globals::isAttached) {
         ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), "Status: Attached to %s", Globals::currentProcess.c_str());
     } else {
         ImGui::TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), "Status: Waiting for Emulator...");
+        ImGui::TextDisabled("(Run as Administrator if not detected)");
     }
 
     ImGui::Separator();
@@ -78,10 +101,17 @@ void RenderGUI() {
     ImGui::Spacing();
     ImGui::Separator();
     
-    ImGui::TextDisabled("Detected Emulators:");
-    ImGui::BulletText("BlueStacks / MSI (HD-Player)");
-    ImGui::BulletText("LDPlayer (dnplayer)");
-    ImGui::BulletText("GameLoop (AndroidEmulatorEx)");
+    if (ImGui::CollapsingHeader("Debug: Process List (First 20)")) {
+        static std::vector<std::string> procs = GetProcessList();
+        if (ImGui::Button("Refresh List")) {
+            procs = GetProcessList();
+        }
+        for (const auto& p : procs) {
+            ImGui::Text("%s", p.c_str());
+        }
+    }
+    
+    ImGui::TextDisabled("Supported: HD-Player.exe, dnplayer.exe, AndroidEmulatorEx.exe");
 
     ImGui::End();
 }

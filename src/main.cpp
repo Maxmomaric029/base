@@ -123,6 +123,14 @@ void FeatureLoop() {
 // Main code
 int main(int, char**)
 {
+    // Enable Console for Debugging
+    AllocConsole();
+    FILE* f;
+    freopen_s(&f, "CONOUT$", "w", stdout);
+    freopen_s(&f, "CONOUT$", "w", stderr);
+    std::cout << "Bloodie Hack Started..." << std::endl;
+    std::cout << "Waiting for emulators..." << std::endl;
+
     // Create application window
     // ImGui_ImplWin32_EnableDpiAwareness();
     WNDCLASSEXW wc = { sizeof(wc), CS_CLASSDC, WndProc, 0L, 0L, GetModuleHandle(NULL), NULL, NULL, NULL, NULL, L"Bloodie Trainer Class", NULL };
